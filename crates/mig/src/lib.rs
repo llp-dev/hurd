@@ -33,14 +33,10 @@
 /// without forcing every consumer to add a `mach-sys` dependency separately.
 pub use mach_sys as mach;
 
-extern "C" {
-    /// Allocate a fresh receive right in the current task's port
-    /// namespace and return its port name. Used by `routine_call!` as
-    /// the reply port for one outbound RPC. Caller must
-    /// `mach_port_deallocate` it once the reply has been received (the
-    /// macro does this automatically).
-    pub fn mach_reply_port() -> mach::mach_port_t;
-}
+// `mach_reply_port` is provided by `mach_sys` and re-exported below so
+// the macros can refer to it as `$crate::mach_reply_port` without an
+// explicit `mach-sys` import in every consumer.
+pub use mach::mach_reply_port;
 
 /// Client-side stub generator for a simple Mach RPC routine.
 ///
