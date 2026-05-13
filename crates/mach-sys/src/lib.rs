@@ -159,13 +159,25 @@ pub const MIG_TYPE_INT32: mach_msg_type_t = mach_msg_type_t {
         | (1u32  << 28),                          // bit  28     msgt_inline
 };
 
+/// Size in bits the kernel expects for an inline port descriptor on
+/// this target. The check in `ipc_kmsg_copyin_body`
+/// (`size != PORT_T_SIZE_IN_BITS`) reads `PORT_T_SIZE_IN_BITS` as
+/// `sizeof(mach_port_t)*8`, and *in the kernel* `mach_port_t` is
+/// `vm_offset_t` (a pointer-sized integer). So the descriptor must
+/// declare 64 bits on x86_64 even though only the low 32 carry the
+/// user-side port name.
+#[cfg(target_pointer_width = "64")]
+pub const PORT_T_SIZE_IN_BITS: u32 = 64;
+#[cfg(target_pointer_width = "32")]
+pub const PORT_T_SIZE_IN_BITS: u32 = 32;
+
 /// Descriptor for a single inline send-right port name with COPY_SEND
 /// disposition (the most common outbound disposition — gives the
 /// receiver a copy of our send right while we keep ours). Used in port-
 /// transferring RPCs like fsys_startup.
 pub const MIG_TYPE_PORT_COPY_SEND: mach_msg_type_t = mach_msg_type_t {
     bits: (MACH_MSG_TYPE_COPY_SEND as u32)        // bits  0..7  msgt_name
-        | (32u32 << 8)                            // bits  8..15 size in bits (port name)
+        | (PORT_T_SIZE_IN_BITS << 8)              // bits  8..15 size in bits (pointer-sized in kernel)
         | (1u32  << 16)                           // bits 16..27 count
         | (1u32  << 28),                          // bit  28     inline
 };
@@ -176,7 +188,7 @@ pub const MIG_TYPE_PORT_COPY_SEND: mach_msg_type_t = mach_msg_type_t {
 /// fsys_startup's reply.
 pub const MIG_TYPE_PORT_MOVE_SEND: mach_msg_type_t = mach_msg_type_t {
     bits: (MACH_MSG_TYPE_MOVE_SEND as u32)
-        | (32u32 << 8)
+        | (PORT_T_SIZE_IN_BITS << 8)
         | (1u32  << 16)
         | (1u32  << 28),
 };
