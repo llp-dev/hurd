@@ -1,0 +1,13 @@
+[target.x86_64-unknown-hurd-gnu]
+linker = "cc"
+rustflags = [
+    "-C", "link-arg=-lpthread",
+    "-C", "link-arg=-lhurdbugaddr",
+]
+
+[target.i686-unknown-hurd-gnu]
+linker = "cc"
+rustflags = [
+    "-C", "link-arg=-lpthread",
+    "-C", "link-arg=-lhurdbugaddr",
+]

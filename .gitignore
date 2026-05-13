@@ -5,6 +5,7 @@
 *.a
 *.so
 *.so.*
+/target/
 TAGS
 
 autom4te.cache/

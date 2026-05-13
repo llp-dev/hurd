@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.9.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+repository = "https://git.savannah.gnu.org/git/hurd.git"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+opt-level = 3
+debug = true
+strip = "none"
+
+[profile.dev]
+panic = "abort"
