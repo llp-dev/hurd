@@ -34,11 +34,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "mig"
+version = "0.9.0"
+dependencies = [
+ "mach-sys",
+]
+
+[[package]]
 name = "ports-sys"
 version = "0.9.0"
 dependencies = [
  "libc-sys",
  "mach-sys",
+]
+
+[[package]]
+name = "shutdown"
+version = "0.9.0"
+dependencies = [
+ "hurd-rt",
+ "libc-sys",
+ "mach-sys",
+ "mig",
+ "ports-sys",
+ "trivfs-sys",
 ]
 
 [[package]]

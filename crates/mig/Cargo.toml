@@ -1,0 +1,11 @@
+[package]
+name = "mig"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "mig"
+
+[dependencies]
+mach-sys = { path = "../mach-sys" }

@@ -91,6 +91,9 @@ extern "C" {
     pub fn __errno_location() -> *mut c_int;
 
     pub fn abort() -> !;
+
+    // exit() — used by trivfs_goaway when a translator goes away cleanly.
+    pub fn exit(status: c_int) -> !;
 }
 
 #[inline] pub fn errno() -> c_int { unsafe { *__errno_location() } }

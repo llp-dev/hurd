@@ -61,7 +61,11 @@ pub const fn MACH_MSGH_BITS(remote: mach_msg_type_name_t, local: mach_msg_type_n
 
 /// Mach message header — every IPC message starts with this 24-byte block.
 /// Layout matches gnumach's `<mach/message.h>`.
+///
+/// Derives Copy so message structs can be members of a #[repr(C)] union
+/// (the standard MIG-style request/reply marshalling pattern).
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct mach_msg_header_t {
     pub msgh_bits:        mach_msg_bits_t,
     pub msgh_size:        mach_msg_size_t,
@@ -69,6 +73,14 @@ pub struct mach_msg_header_t {
     pub msgh_local_port:  mach_port_t,
     pub msgh_seqno:       mach_msg_size_t,
     pub msgh_id:          mach_msg_id_t,
+}
+
+/// Extract the remote-port disposition bits from msgh_bits. Used when
+/// constructing reply messages — the reply's remote-port disposition is
+/// the request's remote disposition.
+#[inline]
+pub const fn MACH_MSGH_BITS_REMOTE(bits: mach_msg_bits_t) -> mach_msg_bits_t {
+    bits & 0x1f
 }
 
 // ---- NDR (Network Data Representation) record ----
@@ -81,6 +93,7 @@ pub struct mach_msg_header_t {
 //     int_rep: 0, char_rep: 0, float_rep: 0, mig_reserved: 0 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct NDR_record_t {
     pub mig_vers:     u8,
     pub if_vers:      u8,
