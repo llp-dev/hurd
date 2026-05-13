@@ -38,7 +38,7 @@ use ports_sys::{
     ports_inhibit_class_rpcs, ports_manage_port_operations_multithread,
     ports_resume_class_rpcs,
 };
-use trivfs_sys::{
+use trivfs::{
     trivfs_add_control_port_class, trivfs_add_port_bucket,
     trivfs_add_protid_port_class, trivfs_control, trivfs_demuxer, trivfs_protid_t,
     trivfs_startup, FSTYPE_MISC, FSYS_GOAWAY_FORCE, O_READ, O_WRITE,

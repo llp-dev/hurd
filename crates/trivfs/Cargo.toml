@@ -1,0 +1,24 @@
+[package]
+name = "trivfs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Pure-Rust reimplementation of libtrivfs. Provides the C-ABI symbols
+# Hurd's trivial-filesystem translators (shutdown, password, etc.) need:
+# trivfs_startup, trivfs_demuxer, trivfs_add_*, trivfs_clean_*, plus
+# the user-defined globals/callbacks declared as `extern "C"` here and
+# satisfied by the translator binary.
+#
+# Underneath this crate we still use the C libports for port-bucket /
+# port-class / port-info / refcount machinery — talking to it via
+# ports-sys. Replacing libports is a separate (later) project.
+
+[lib]
+name = "trivfs"
+
+[dependencies]
+mach-sys  = { path = "../mach-sys" }
+ports-sys = { path = "../ports-sys" }
+mig       = { path = "../mig" }
+libc      = { package = "libc-sys", path = "../libc-sys" }

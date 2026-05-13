@@ -11,8 +11,8 @@
 #![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
 
 use core::marker::PhantomData;
-use libc::{c_int, error_t};
-use mach_sys::mach_msg_header_t;
+use libc::{c_int, c_void, error_t};
+use mach_sys::{mach_msg_header_t, mach_port_t};
 
 // ---- opaque types ----
 //
@@ -79,4 +79,45 @@ extern "C" {
     /// Number of extant ports in `class`. Used by trivfs_goaway to decide
     /// whether unmount is safe.
     pub fn ports_count_class(class: *mut port_class) -> c_int;
+
+    /// Allocate a fresh bucket; returns NULL on OOM.
+    pub fn ports_create_bucket() -> *mut port_bucket;
+
+    /// Allocate a fresh port class. `clean_routine` is invoked on each
+    /// port in this class when it is destroyed; `dropweak_routine` is
+    /// invoked when a weak reference should be dropped (libtrivfs
+    /// doesn't use weak references so we pass NULL).
+    pub fn ports_create_class(
+        clean_routine:    Option<unsafe extern "C" fn(*mut c_void)>,
+        dropweak_routine: Option<unsafe extern "C" fn(*mut c_void)>,
+    ) -> *mut port_class;
+
+    /// Create a fresh port in `class`/`bucket` with `size` bytes of
+    /// memory. The returned pointer's first `sizeof(port_info)` bytes
+    /// are the libports header; the caller's struct should begin with a
+    /// `struct port_info` and reserve `size` total bytes including its
+    /// trailing private data.
+    pub fn ports_create_port(
+        class:   *mut port_class,
+        bucket:  *mut port_bucket,
+        size:    usize,
+        result:  *mut *mut c_void,
+    ) -> error_t;
+
+    /// Return the receive-right name associated with a port. The caller
+    /// is then responsible for synthesising a send-right from it (or use
+    /// `ports_get_send_right` which does both).
+    pub fn ports_get_right(port: *mut c_void) -> mach_port_t;
+
+    /// Return a send-right name suitable for handing out to a peer.
+    /// Libports also arranges for dead-name notifications etc.
+    pub fn ports_get_send_right(port: *mut c_void) -> mach_port_t;
+
+    /// Increment the (hard) reference count on a port.
+    pub fn ports_port_ref(port: *mut c_void);
+
+    /// Decrement the reference count on a port. When the count reaches
+    /// zero, libports invokes the class's `clean_routine` and frees the
+    /// port.
+    pub fn ports_port_deref(port: *mut c_void);
 }

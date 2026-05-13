@@ -57,7 +57,17 @@ dependencies = [
  "mach-sys",
  "mig",
  "ports-sys",
- "trivfs-sys",
+ "trivfs",
+]
+
+[[package]]
+name = "trivfs"
+version = "0.9.0"
+dependencies = [
+ "libc-sys",
+ "mach-sys",
+ "mig",
+ "ports-sys",
 ]
 
 [[package]]

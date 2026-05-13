@@ -159,6 +159,35 @@ pub const MIG_TYPE_INT32: mach_msg_type_t = mach_msg_type_t {
         | (1u32  << 28),                          // bit  28     msgt_inline
 };
 
+/// Descriptor for a single inline send-right port name with COPY_SEND
+/// disposition (the most common outbound disposition — gives the
+/// receiver a copy of our send right while we keep ours). Used in port-
+/// transferring RPCs like fsys_startup.
+pub const MIG_TYPE_PORT_COPY_SEND: mach_msg_type_t = mach_msg_type_t {
+    bits: (MACH_MSG_TYPE_COPY_SEND as u32)        // bits  0..7  msgt_name
+        | (32u32 << 8)                            // bits  8..15 size in bits (port name)
+        | (1u32  << 16)                           // bits 16..27 count
+        | (1u32  << 28),                          // bit  28     inline
+};
+
+/// Descriptor for a single inline send-right port name with MOVE_SEND
+/// disposition (transfer ownership). Used in reply paths where the
+/// server hands a port-right to the caller — e.g. realnode in
+/// fsys_startup's reply.
+pub const MIG_TYPE_PORT_MOVE_SEND: mach_msg_type_t = mach_msg_type_t {
+    bits: (MACH_MSG_TYPE_MOVE_SEND as u32)
+        | (32u32 << 8)
+        | (1u32  << 16)
+        | (1u32  << 28),
+};
+
+/// `msgh_bits` flag indicating the message carries port-right
+/// references (so the kernel knows to translate the inline names).
+/// Set whenever any descriptor names a PORT_* type — otherwise the
+/// kernel treats the message as plain data and the port names won't
+/// be translated.
+pub const MACH_MSGH_BITS_COMPLEX: mach_msg_bits_t = 0x80000000;
+
 /// MIG-defined error code for a mismatched message type or descriptor
 /// shape. Returned by handlers when a reply doesn't look how we expect.
 pub const MIG_TYPE_ERROR: kern_return_t = -303;
