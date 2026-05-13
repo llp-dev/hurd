@@ -42,6 +42,13 @@ pub const KERN_FAILURE:   kern_return_t = 5;
 pub const MACH_MSG_OPTION_NONE: mach_msg_option_t = 0;
 pub const MACH_SEND_MSG:        mach_msg_option_t = 0x00000001;
 pub const MACH_RCV_MSG:         mach_msg_option_t = 0x00000002;
+pub const MACH_SEND_TIMEOUT:    mach_msg_option_t = 0x00000010;
+pub const MACH_RCV_TIMEOUT:     mach_msg_option_t = 0x00000100;
+
+// mach_msg return codes commonly used for diagnostics
+pub const MACH_SEND_INVALID_DEST: mach_msg_return_t = 0x10000003;
+pub const MACH_RCV_TIMED_OUT:     mach_msg_return_t = 0x10004003;
+pub const MACH_RCV_TOO_LARGE:     mach_msg_return_t = 0x10004004;
 
 // msgh_bits encoding helpers — top byte is reserved, then complex/local/remote
 pub const MACH_MSG_TYPE_MOVE_RECEIVE:   mach_msg_type_name_t = 16;
@@ -262,13 +269,17 @@ pub unsafe fn task_get_special_port(
     buf.req.head.msgh_local_port  = reply_port;
     buf.req.head.msgh_id          = TASK_GET_SPECIAL_PORT_ID;
 
+    // 5-second timeout on RECV so we never hang forever during dev.
+    // If this fires (MACH_RCV_TIMED_OUT) it means our SEND completed
+    // but the kernel didn't reply within 5s — likely the kernel
+    // silently dropped our message because its parse failed.
     let ret = mach_msg(
         &mut buf.req.head as *mut _,
-        MACH_SEND_MSG | MACH_RCV_MSG,
+        MACH_SEND_MSG | MACH_RCV_MSG | MACH_RCV_TIMEOUT,
         core::mem::size_of::<Req>() as u32,
         core::mem::size_of::<Buf>() as u32,
         reply_port,
-        0,
+        5000,
         MACH_PORT_NULL,
     );
     if ret != KERN_SUCCESS {

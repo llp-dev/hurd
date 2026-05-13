@@ -201,8 +201,18 @@ fn main(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
 
     let mut bootstrap: mach_port_t = 0;
     dbg(b"shutdown: calling task_get_bootstrap_port\n");
-    task_get_bootstrap_port(mach_task_self(), &mut bootstrap);
-    dbg(b"shutdown: task_get_bootstrap_port returned\n");
+    let kr = task_get_bootstrap_port(mach_task_self(), &mut bootstrap);
+    dbg(b"shutdown: task_get_bootstrap_port returned, kr=0x");
+    // Print kr as 8 hex digits to stderr.
+    let mut hex = [b'0'; 8];
+    let bytes = (kr as u32).to_be_bytes();
+    let hexchars = b"0123456789abcdef";
+    for i in 0..4 {
+        hex[i * 2]     = hexchars[(bytes[i] >> 4) as usize];
+        hex[i * 2 + 1] = hexchars[(bytes[i] & 0x0f) as usize];
+    }
+    let _ = libc::write(2, hex.as_ptr() as *const core::ffi::c_void, hex.len());
+    dbg(b"\n");
 
     if bootstrap == MACH_PORT_NULL {
         dbg(b"shutdown: bootstrap is NULL\n");
