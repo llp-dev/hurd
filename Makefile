@@ -44,7 +44,6 @@ prog-subdirs = auth proc exec term \
 	       benchmarks fstests \
 	       procfs \
 	       startup \
-	       init \
 	       devnode \
 	       eth-multiplexer \
 	       shutdown \
