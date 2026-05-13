@@ -51,8 +51,6 @@ MIG = @MIG@
 MIGCOM = $(MIG) -cc cat - /dev/null
 AWK = @AWK@
 SED = @SED@
-RUSTC = @RUSTC@
-rust_target = @rust_target@
 
 # Compilation flags.  Append these to the definitions already made by
 # the specific Makefile.
