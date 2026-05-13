@@ -1,0 +1,82 @@
+//! FFI bindings to Hurd's libports.
+//!
+//! libports is the Hurd library that implements Mach-port lifecycle
+//! management for servers: port classes, port buckets, the multithreaded
+//! message-handling loop, RPC inhibition during shutdown, etc.
+//!
+//! Only the symbols current Rust consumers need are bound; grow as more
+//! servers come online.
+
+#![no_std]
+#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
+
+use core::marker::PhantomData;
+use libc::{c_int, error_t};
+use mach_sys::mach_msg_header_t;
+
+// ---- opaque types ----
+//
+// `struct port_class` and `struct port_bucket` are internal to libports.
+// Consumers only ever see pointers to them, never construct or inspect
+// the contents. The zero-size array + PhantomData<*mut u8> pattern makes
+// the types unconstructible in safe Rust and not Send/Sync by default.
+
+#[repr(C)]
+pub struct port_class {
+    _opaque:  [u8; 0],
+    _phantom: PhantomData<(*mut u8, ::core::marker::PhantomPinned)>,
+}
+
+#[repr(C)]
+pub struct port_bucket {
+    _opaque:  [u8; 0],
+    _phantom: PhantomData<(*mut u8, ::core::marker::PhantomPinned)>,
+}
+
+// ---- function-pointer typedefs ----
+
+/// libports demuxer signature: given an incoming message header, examine
+/// `msgh_id`, dispatch to the matching handler, and fill `outp` with the
+/// reply. Returns nonzero if the message was handled, 0 otherwise.
+pub type ports_demuxer_type = unsafe extern "C" fn(
+    inp:  *mut mach_msg_header_t,
+    outp: *mut mach_msg_header_t,
+) -> c_int;
+
+/// "Hook" callback type for `ports_manage_port_operations_multithread`.
+/// Called periodically by libports' worker threads; shutdown.c passes 0
+/// (no hook).
+pub type ports_hook_type = Option<unsafe extern "C" fn()>;
+
+// ---- extern functions ----
+
+#[link(name = "ports")]
+extern "C" {
+    /// Drive the message-handling loop on `bucket` with the given demuxer.
+    /// Spawns worker threads internally and never returns under normal
+    /// operation. Returns when the bucket is shut down.
+    ///
+    /// `global_timeout` and `local_timeout` are in milliseconds; controls
+    /// how long worker threads stay alive after going idle.
+    pub fn ports_manage_port_operations_multithread(
+        bucket:         *mut port_bucket,
+        demuxer:        ports_demuxer_type,
+        global_timeout: c_int,
+        local_timeout:  c_int,
+        hook:           ports_hook_type,
+    );
+
+    /// Block new RPCs from arriving for ports in `class`. Used during
+    /// orderly shutdown of a translator.
+    pub fn ports_inhibit_class_rpcs(class: *mut port_class) -> error_t;
+
+    /// Reverse of ports_inhibit_class_rpcs — allow new RPCs again.
+    pub fn ports_resume_class_rpcs(class: *mut port_class);
+
+    /// Enable a class to accept new ports.
+    pub fn ports_enable_class(class: *mut port_class);
+
+    /// Number of extant ports in `class`. Used by trivfs_goaway to decide
+    /// whether unmount is safe.
+    pub fn ports_count_class(class: *mut port_class) -> c_int;
+}

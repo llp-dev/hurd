@@ -1,0 +1,13 @@
+[package]
+name = "ports-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+links = "ports"
+
+[lib]
+name = "ports_sys"
+
+[dependencies]
+mach-sys = { path = "../mach-sys" }
+libc = { package = "libc-sys", path = "../libc-sys" }

@@ -20,3 +20,27 @@ dependencies = [
 [[package]]
 name = "libc-sys"
 version = "0.9.0"
+
+[[package]]
+name = "mach-sys"
+version = "0.9.0"
+dependencies = [
+ "libc-sys",
+]
+
+[[package]]
+name = "ports-sys"
+version = "0.9.0"
+dependencies = [
+ "libc-sys",
+ "mach-sys",
+]
+
+[[package]]
+name = "trivfs-sys"
+version = "0.9.0"
+dependencies = [
+ "libc-sys",
+ "mach-sys",
+ "ports-sys",
+]

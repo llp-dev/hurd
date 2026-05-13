@@ -1,0 +1,14 @@
+[package]
+name = "mach-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# mach functions live in glibc on Hurd (libc.so.0.3); declaring links = "c"
+# here would conflict with libc-sys's claim. Instead, mach-sys depends on
+# libc-sys and inherits its libc link.
+
+[lib]
+name = "mach_sys"
+
+[dependencies]
+libc = { package = "libc-sys", path = "../libc-sys" }
