@@ -51,6 +51,18 @@ pub const MACH_RCV_TIMED_OUT:     mach_msg_return_t = 0x10004003;
 pub const MACH_RCV_TOO_LARGE:     mach_msg_return_t = 0x10004004;
 
 // msgh_bits encoding helpers — top byte is reserved, then complex/local/remote
+// Element-type tags for inline scalar arguments (msgt_name field of
+// mach_msg_type_t). See gnumach's <mach/message.h>.
+pub const MACH_MSG_TYPE_UNSTRUCTURED:   mach_msg_type_name_t =  0;
+pub const MACH_MSG_TYPE_INTEGER_16:     mach_msg_type_name_t =  1;
+pub const MACH_MSG_TYPE_INTEGER_32:     mach_msg_type_name_t =  2;
+pub const MACH_MSG_TYPE_CHAR:           mach_msg_type_name_t =  8;
+pub const MACH_MSG_TYPE_BYTE:           mach_msg_type_name_t =  9;
+pub const MACH_MSG_TYPE_REAL:           mach_msg_type_name_t = 10;
+pub const MACH_MSG_TYPE_INTEGER_64:     mach_msg_type_name_t = 11;
+pub const MACH_MSG_TYPE_STRING:         mach_msg_type_name_t = 12;
+
+// Port-right transfer dispositions (used in msgh_bits, not as msgt_name).
 pub const MACH_MSG_TYPE_MOVE_RECEIVE:   mach_msg_type_name_t = 16;
 pub const MACH_MSG_TYPE_MOVE_SEND:      mach_msg_type_name_t = 17;
 pub const MACH_MSG_TYPE_MOVE_SEND_ONCE: mach_msg_type_name_t = 18;
@@ -109,77 +121,87 @@ pub const fn MACH_MSGH_BITS_REMOTE(bits: mach_msg_bits_t) -> mach_msg_bits_t {
     bits & 0x1f
 }
 
-// ---- NDR (Network Data Representation) record ----
+// ---- mach_msg_type_t — old-format MIG inline-argument descriptor ----
 //
-// MIG-marshalled messages start with an NDR record after the header.
-// The record describes byte order, char encoding, etc. of the wire
-// payload. For x86 little-endian ASCII glibc-on-Hurd, the constant
-// value `NDR_record` (defined in glibc's ndr.h) is:
-//   { mig_reserved: 0, mig_reserved: 0, mig_reserved: 0,
-//     int_rep: 0, char_rep: 0, float_rep: 0, mig_reserved: 0 }
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct NDR_record_t {
-    pub mig_vers:     u8,
-    pub if_vers:      u8,
-    pub reserved1:    u8,
-    pub mig_encoding: u8,
-    pub int_rep:      u8,
-    pub char_rep:     u8,
-    pub float_rep:    u8,
-    pub reserved2:    u8,
-}
-
-/// The canonical NDR record value for our host (little-endian, ASCII).
-/// MIG-generated code emits this exact byte pattern at the start of every
-/// marshalled payload. We use it the same way for hand-written stubs.
-pub const NDR_RECORD: NDR_record_t = NDR_record_t {
-    mig_vers:     0,
-    if_vers:      0,
-    reserved1:    0,
-    mig_encoding: 0,
-    int_rep:      0,
-    char_rep:     0,
-    float_rep:    0,
-    reserved2:    0,
-};
-
-// ---- complex-message descriptor types ----
+// Modern (Darwin/NeXTSTEP) Mach uses NDR records + per-arg descriptors
+// only for complex messages. GNU Mach kept the older Mach 2.5 protocol:
+// every inline scalar argument is preceded by an 8-byte (on x86_64)
+// `mach_msg_type_t` that names its element type, size in *bits*, count,
+// and inline-vs-out-of-line flag.
 //
-// "Complex" Mach messages carry typed descriptors after the header
-// (ports, out-of-line memory, etc.). The msgh_bits COMPLEX flag tells
-// the kernel/server to interpret what follows the header as a
-// descriptor table rather than raw NDR-encoded scalars.
+// In C this is a packed 32-bit bitfield with `aligned(uintptr_t)`:
+//   struct {
+//     unsigned int msgt_name : 8,
+//                  msgt_size : 8,        /* size in bits! */
+//                  msgt_number : 12,
+//                  msgt_inline : 1,
+//                  msgt_longform : 1,
+//                  msgt_deallocate : 1,
+//                  msgt_unused : 1;
+//   } __attribute__ ((aligned (__alignof__ (uintptr_t))));
+//
+// We model the 32 packed bits as a single u32 and force 8-byte
+// alignment with repr(C, align(8)) so embedded use matches C layout.
+// Encoding is LSB-first (matches GCC bitfields on little-endian x86).
 
-pub const MACH_MSGH_BITS_COMPLEX: mach_msg_bits_t = 0x80000000;
-
-/// Body header: how many descriptors follow.
-#[repr(C)]
+#[repr(C, align(8))]
 #[derive(Copy, Clone)]
-pub struct mach_msg_body_t {
-    pub msgh_descriptor_count: mach_msg_size_t,
-}
-
-/// Descriptor for transferring a single port right. Used as the reply
-/// payload for routines like task_get_special_port. On GNU Mach the
-/// `bits` u32 packs pad2:16 | disposition:8 | type:8 from low to high.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct mach_msg_port_descriptor_t {
-    pub name: mach_port_t,
-    pub pad1: mach_msg_size_t,
+pub struct mach_msg_type_t {
     pub bits: u32,
 }
 
-/// Descriptor-type tag for a single port-right descriptor (vs out-of-line
-/// memory, port arrays, etc.).
-pub const MACH_MSG_PORT_DESCRIPTOR: u32 = 0;
+/// Canonical descriptor for a single inline 32-bit signed integer
+/// (msgt_name = INTEGER_32, msgt_size = 32, msgt_number = 1, inline = 1).
+pub const MIG_TYPE_INT32: mach_msg_type_t = mach_msg_type_t {
+    bits: (MACH_MSG_TYPE_INTEGER_32 as u32)       // bits  0..7  msgt_name
+        | (32u32 << 8)                            // bits  8..15 msgt_size (BITS)
+        | (1u32  << 16)                           // bits 16..27 msgt_number
+        | (1u32  << 28),                          // bit  28     msgt_inline
+};
 
 /// MIG-defined error code for a mismatched message type or descriptor
-/// shape. Returned by our hand-written stubs when the reply doesn't
-/// look how we expect.
+/// shape. Returned by handlers when a reply doesn't look how we expect.
 pub const MIG_TYPE_ERROR: kern_return_t = -303;
+
+/// Trait for scalar types that can be marshalled as a MIG inline argument.
+/// The `mig` crate's `routine_call!` / `routine_serve!` macros consult
+/// `<$ty as MigScalar>::TYPE` to emit the right descriptor for each
+/// argument. Impl this for any new scalar you need to send over MIG.
+pub trait MigScalar: Copy {
+    const TYPE: mach_msg_type_t;
+}
+
+impl MigScalar for c_int {
+    const TYPE: mach_msg_type_t = MIG_TYPE_INT32;
+}
+
+/// Tagged inline argument: an 8-byte (on x86_64) `mach_msg_type_t`
+/// descriptor followed by the value itself.
+///
+/// `repr(C, align(8))` ensures the next slot in a message struct lands
+/// on the 8-byte boundary the C-side stubs expect — see
+/// `mach.user.c`'s generated `Request` layout in the gnumach build:
+/// the int that follows the descriptor is padded out to a multiple of
+/// the word size so subsequent descriptors stay aligned.
+#[repr(C, align(8))]
+#[derive(Copy, Clone)]
+pub struct Tagged<T: Copy + MigScalar> {
+    pub descriptor: mach_msg_type_t,
+    pub value:      T,
+}
+
+// ---- layout assertions (x86_64 GNU Mach userspace) ----
+//
+// These are the wire-format invariants we depend on. If any of these
+// fire at compile time, message marshalling will be off by exactly the
+// difference and the kernel will reject our sends with
+// MACH_SEND_MSG_TOO_SMALL or similar.
+#[cfg(target_pointer_width = "64")]
+const _: () = {
+    assert!(::core::mem::size_of::<mach_msg_header_t>() == 32);
+    assert!(::core::mem::size_of::<mach_msg_type_t>()   ==  8);
+    assert!(::core::mem::size_of::<Tagged<c_int>>()     == 16);
+};
 
 // ---- task special-port indices ----
 //
