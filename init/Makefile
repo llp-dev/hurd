@@ -17,10 +17,27 @@
 dir := init
 makemode := server
 
-SRCS = init.c
-OBJS = $(SRCS:.c=.o)
+# init is implemented in Rust. See init.rs. The crate is #![no_std] +
+# #![no_main] and uses FFI directly into glibc, so the final link looks
+# exactly the same as the original C version did: crt1/crti come from libc,
+# our `main` symbol comes from init.o, and libhurdbugaddr is linked in by
+# the generic rules in ../Makeconf.
+
+SRCS = init.rs
+OBJS = init.o
 target = init
 
-init-CPPFLAGS=-DLIBEXECDIR=\"${libexecdir}\"
+# LIBEXECDIR and HURD_VERSION are baked into the Rust source via env!() at
+# compile time (see uses of env!() in init.rs). HURD_VERSION mirrors what the
+# C build does via STANDARD_HURD_VERSION / version.h.
+RUSTFLAGS = \
+	$(if $(rust_target),--target=$(rust_target)) \
+	--edition=2021 \
+	--crate-type=staticlib --emit=obj \
+	-C panic=abort -C codegen-units=1 -C opt-level=3 -C debuginfo=2
+
+init.o: init.rs
+	LIBEXECDIR='$(libexecdir)' HURD_VERSION='$(package-version)' \
+	  $(RUSTC) $(RUSTFLAGS) -o $@ $<
 
 include ../Makeconf

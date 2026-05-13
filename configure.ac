@@ -110,6 +110,16 @@ if test x${MIG} = x; then
 *** (ftp.gnu.org) or any GNU mirror.])
 fi
 
+# rustc is used to build the init server (init/init.rs).  We map the
+# autoconf canonical $host_cpu to the corresponding Rust target triple.
+AC_CHECK_TOOL(RUSTC, rustc)
+case "$host_cpu" in
+  i?86)    rust_target=i686-unknown-hurd-gnu ;;
+  x86_64)  rust_target=x86_64-unknown-hurd-gnu ;;
+  *)       rust_target= ;;
+esac
+AC_SUBST(rust_target)
+
 dnl Let these propagate from the environment.
 AC_SUBST(CFLAGS) AC_SUBST(CPPFLAGS) AC_SUBST(LDFLAGS)
 
