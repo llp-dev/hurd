@@ -66,20 +66,39 @@ pub const fn MACH_MSGH_BITS(remote: mach_msg_type_name_t, local: mach_msg_type_n
 
 // ---- message header ----
 
-/// Mach message header — every IPC message starts with this 24-byte block.
-/// Layout matches gnumach's `<mach/message.h>`.
+/// Mach message header — every IPC message starts with this 32-byte block
+/// on x86_64-gnu.
 ///
-/// Derives Copy so message structs can be members of a #[repr(C)] union
-/// (the standard MIG-style request/reply marshalling pattern).
+/// Layout matches gnumach's `<mach/message.h>`. The port-name fields live
+/// inside an anonymous union with `rpc_uintptr_t` (so the kernel can stash
+/// a pointer in the same slot without rewriting the message on 64-bit):
+///
+/// ```c
+/// typedef struct mach_msg_header {
+///     mach_msg_bits_t  msgh_bits;       // 4
+///     mach_msg_size_t  msgh_size;       // 4
+///     union { mach_port_t msgh_remote_port; rpc_uintptr_t pad; };  // 8
+///     union { mach_port_t msgh_local_port;  rpc_uintptr_t pay; };  // 8
+///     mach_port_seqno_t msgh_seqno;     // 4
+///     mach_msg_id_t     msgh_id;        // 4
+/// } mach_msg_header_t;                  // total: 32
+/// ```
+///
+/// We model each port union with an explicit `u32` port-name field
+/// followed by 4 bytes of pad, matching the byte layout. Userspace only
+/// ever reads/writes the low 32 bits; the high 32 are zero on send and
+/// ignored on receive.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct mach_msg_header_t {
-    pub msgh_bits:        mach_msg_bits_t,
-    pub msgh_size:        mach_msg_size_t,
-    pub msgh_remote_port: mach_port_t,
-    pub msgh_local_port:  mach_port_t,
-    pub msgh_seqno:       mach_msg_size_t,
-    pub msgh_id:          mach_msg_id_t,
+    pub msgh_bits:         mach_msg_bits_t,
+    pub msgh_size:         mach_msg_size_t,
+    pub msgh_remote_port:  mach_port_t,
+    pub _msgh_remote_pad:  u32,
+    pub msgh_local_port:   mach_port_t,
+    pub _msgh_local_pad:   u32,
+    pub msgh_seqno:        mach_msg_size_t,
+    pub msgh_id:           mach_msg_id_t,
 }
 
 /// Extract the remote-port disposition bits from msgh_bits. Used when
@@ -173,21 +192,22 @@ pub const TASK_HOST_PORT:      c_int = 2;
 pub const TASK_NAME_PORT:      c_int = 3;
 pub const TASK_BOOTSTRAP_PORT: c_int = 4;
 
-/// MIG msgh_id for task_get_special_port. Subsystem `task` is 3400 on
-/// GNU Mach and this is routine offset 10 → 3410. Verified against
-/// gnumach's mach/task.defs.
-const TASK_GET_SPECIAL_PORT_ID: mach_msg_id_t = 3410;
-
 // ---- extern functions ----
 //
-// Notes:
-//   - `mach_task_self()` is conventionally a macro in C that reads the
-//     global `__mach_task_self_`. We bind the global directly and
-//     provide a thin Rust function below.
-//   - `task_get_bootstrap_port` is *not* a real symbol in any Hurd
-//     library — it's a `static inline` in <mach/task.h> that wraps
-//     `task_get_special_port`. We provide our own Rust implementation
-//     so we don't depend on the header.
+// `task_get_special_port` IS a real symbol in libc.so.0.3 on Hurd
+// (verified via `nm -D /usr/lib/.../libc.so.0.3`). What `<mach/task.h>`
+// publishes as a static inline is the `task_get_bootstrap_port`
+// convenience macro, which trivially wraps the real RPC stub. So:
+//
+//   - We declare `task_get_special_port` as `extern "C"` and let the
+//     linker resolve it (via -lc; libmachuser is a transitional alias
+//     in the modern Hurd port).
+//   - We provide a Rust `task_get_bootstrap_port` inline that does the
+//     same wrap the C header does, no marshalling required.
+//
+// `mach_task_self()` is a macro in C that reads the global
+// `__mach_task_self_`. We bind the global directly and provide a thin
+// Rust function below.
 
 extern "C" {
     pub static __mach_task_self_: mach_port_t;
@@ -207,6 +227,15 @@ extern "C" {
     /// Allocate a fresh receive right in the current task; returns its
     /// port name. Used as the reply port for outbound RPCs.
     pub fn mach_reply_port() -> mach_port_t;
+
+    /// Retrieve one of the task's well-known special ports
+    /// (kernel/host/name/bootstrap). MIG-generated stub from
+    /// `mach/mach.defs`.
+    pub fn task_get_special_port(
+        target_task: mach_port_t,
+        which_port:  c_int,
+        out:         *mut mach_port_t,
+    ) -> kern_return_t;
 }
 
 #[inline]
@@ -214,98 +243,9 @@ pub fn mach_task_self() -> mach_port_t {
     unsafe { __mach_task_self_ }
 }
 
-/// Hand-written client stub for the Mach RPC
-/// `task_get_special_port(target, which_port, out_port)`.
-///
-/// Wire format (request):  Head + NDR + which_port:int           = 36 bytes
-/// Wire format (reply):    Head + body + port_descriptor          = 36 bytes
-///
-/// The reply's msgh_bits has MACH_MSGH_BITS_COMPLEX set; the kernel
-/// transfers the requested port right (TASK_*_PORT) to us via the
-/// `mach_msg_port_descriptor_t` payload.
-pub unsafe fn task_get_special_port(
-    target_task: mach_port_t,
-    which_port:  c_int,
-    out:         *mut mach_port_t,
-) -> kern_return_t {
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    struct Req {
-        head:       mach_msg_header_t,
-        ndr:        NDR_record_t,
-        which_port: c_int,
-    }
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    struct Rep {
-        head: mach_msg_header_t,
-        body: mach_msg_body_t,
-        port: mach_msg_port_descriptor_t,
-    }
-    #[repr(C)]
-    union Buf { req: Req, rep: Rep }
-
-    let mut buf = Buf {
-        req: Req {
-            head: mach_msg_header_t {
-                msgh_bits:        0,
-                msgh_size:        0,
-                msgh_remote_port: 0,
-                msgh_local_port:  0,
-                msgh_seqno:       0,
-                msgh_id:          0,
-            },
-            ndr:        NDR_RECORD,
-            which_port,
-        },
-    };
-
-    let reply_port = mach_reply_port();
-
-    buf.req.head.msgh_bits =
-        MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
-    buf.req.head.msgh_size        = core::mem::size_of::<Req>() as u32;
-    buf.req.head.msgh_remote_port = target_task;
-    buf.req.head.msgh_local_port  = reply_port;
-    buf.req.head.msgh_id          = TASK_GET_SPECIAL_PORT_ID;
-
-    // 5-second timeout on RECV so we never hang forever during dev.
-    // If this fires (MACH_RCV_TIMED_OUT) it means our SEND completed
-    // but the kernel didn't reply within 5s — likely the kernel
-    // silently dropped our message because its parse failed.
-    let ret = mach_msg(
-        &mut buf.req.head as *mut _,
-        MACH_SEND_MSG | MACH_RCV_MSG | MACH_RCV_TIMEOUT,
-        core::mem::size_of::<Req>() as u32,
-        core::mem::size_of::<Buf>() as u32,
-        reply_port,
-        5000,
-        MACH_PORT_NULL,
-    );
-    if ret != KERN_SUCCESS {
-        return ret;
-    }
-
-    // The kernel must have sent exactly one descriptor, of port type,
-    // disposition SEND. If not, the reply is malformed.
-    if buf.rep.body.msgh_descriptor_count != 1 {
-        return MIG_TYPE_ERROR;
-    }
-    let disposition = (buf.rep.port.bits >> 16) & 0xff;
-    if disposition != MACH_MSG_TYPE_MOVE_SEND
-        && disposition != MACH_MSG_TYPE_COPY_SEND
-    {
-        return MIG_TYPE_ERROR;
-    }
-
-    *out = buf.rep.port.name;
-    KERN_SUCCESS
-}
-
-/// Convenience wrapper: fetch the task's bootstrap port (its translator
-/// parent / control port). The C header `<mach/task.h>` defines this
-/// as a static inline wrapping `task_get_special_port` with
-/// `TASK_BOOTSTRAP_PORT`.
+/// Fetch the task's bootstrap port (its translator parent / control port).
+/// `<mach/task.h>` defines this as a static inline wrapping
+/// `task_get_special_port(TASK_BOOTSTRAP_PORT)` — we mirror that exactly.
 #[inline]
 pub unsafe fn task_get_bootstrap_port(
     target_task: mach_port_t,
