@@ -94,6 +94,9 @@ extern "C" {
 
     // exit() — used by trivfs_goaway when a translator goes away cleanly.
     pub fn exit(status: c_int) -> !;
+
+    // write() — POSIX raw I/O. Useful for diagnostic printf-free traces.
+    pub fn write(fd: c_int, buf: *const c_void, count: usize) -> isize;
 }
 
 #[inline] pub fn errno() -> c_int { unsafe { *__errno_location() } }

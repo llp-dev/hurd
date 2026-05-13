@@ -188,16 +188,30 @@ unsafe extern "C" fn combined_demuxer(
 
 // ---- Entry point ----
 
+// Tiny stderr-only diagnostic. Using write(2, ...) directly avoids any
+// printf-style formatting machinery so we can see traces even when libc
+// or other init is in a bad state.
+unsafe fn dbg(msg: &[u8]) {
+    let _ = libc::write(2, msg.as_ptr() as *const core::ffi::c_void, msg.len());
+}
+
 #[hurd_rt::entry]
 fn main(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
+    dbg(b"shutdown: entered main\n");
+
     let mut bootstrap: mach_port_t = 0;
+    dbg(b"shutdown: calling task_get_bootstrap_port\n");
     task_get_bootstrap_port(mach_task_self(), &mut bootstrap);
+    dbg(b"shutdown: task_get_bootstrap_port returned\n");
+
     if bootstrap == MACH_PORT_NULL {
+        dbg(b"shutdown: bootstrap is NULL\n");
         error(
             1, 0,
             b"must be started as a translator\0".as_ptr() as *const c_char,
         );
     }
+    dbg(b"shutdown: bootstrap non-NULL\n");
 
     // &raw mut instead of &mut on these statics: Rust 2024 edition lints
     // against creating actual mutable references to mutable statics because
@@ -223,6 +237,7 @@ fn main(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
         );
     }
 
+    dbg(b"shutdown: calling trivfs_startup\n");
     let mut fsys: *mut trivfs_control = null_mut();
     let err = trivfs_startup(
         bootstrap, 0,
@@ -230,6 +245,7 @@ fn main(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
         TRIVFS_PROTID_CLASS,  PORT_BUCKET,
         &mut fsys,
     );
+    dbg(b"shutdown: trivfs_startup returned\n");
     mach_port_deallocate(mach_task_self(), bootstrap);
     if err != 0 {
         error(
@@ -237,6 +253,7 @@ fn main(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
             b"Contacting parent\0".as_ptr() as *const c_char,
         );
     }
+    dbg(b"shutdown: entering main loop\n");
 
     // Service requests forever. ports_manage_port_operations_multithread
     // can return (it has timeouts on idle worker threads); restart it.
