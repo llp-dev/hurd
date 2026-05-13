@@ -212,6 +212,28 @@ unsafe fn fsys_startup(
         },
     };
 
+    // Diagnostic: dump the 64 request bytes we're about to send so we can
+    // compare to the mig-generated stub's wire format.
+    {
+        let bytes = core::slice::from_raw_parts(
+            &buf.req as *const _ as *const u8,
+            ::core::mem::size_of::<Req>(),
+        );
+        libc::write(2, b"fsys_startup req:\n\0".as_ptr() as *const _, 18);
+        let hexchars = b"0123456789abcdef";
+        let mut line = [0u8; 56];
+        for row in 0..(bytes.len() / 16) {
+            for col in 0..16 {
+                let b = bytes[row * 16 + col];
+                line[col * 3]     = hexchars[(b >> 4) as usize];
+                line[col * 3 + 1] = hexchars[(b & 0x0f) as usize];
+                line[col * 3 + 2] = b' ';
+            }
+            line[48] = b'\n';
+            libc::write(2, line.as_ptr() as *const _, 49);
+        }
+    }
+
     let ret = mach_msg(
         &mut buf.req.head as *mut _,
         MACH_SEND_MSG | MACH_RCV_MSG,
@@ -221,6 +243,19 @@ unsafe fn fsys_startup(
         0,
         MACH_PORT_NULL,
     );
+
+    // And dump the kr value so we know exactly what mach_msg returned.
+    {
+        let hexchars = b"0123456789abcdef";
+        let mut line = [b'f', b's', b'y', b's', b'_', b's', b't', b'a', b'r', b't', b'u', b'p', b':', b' ', b'k', b'r', b'=', b'0', b'x',
+                        b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'\n'];
+        let bytes = (ret as u32).to_be_bytes();
+        for i in 0..4 {
+            line[19 + i * 2]     = hexchars[(bytes[i] >> 4) as usize];
+            line[19 + i * 2 + 1] = hexchars[(bytes[i] & 0x0f) as usize];
+        }
+        libc::write(2, line.as_ptr() as *const _, line.len());
+    }
     if ret != KERN_SUCCESS {
         return ret;
     }
