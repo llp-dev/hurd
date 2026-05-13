@@ -10,4 +10,6 @@ name = "init"
 path = "src/main.rs"
 
 [dependencies]
-libc = { path = "../libc" }
+# `package = "libc-sys"` aliases the crate locally to `libc` so source code
+# can keep writing `use libc::*` regardless of the on-disk package name.
+libc = { package = "libc-sys", path = "../libc-sys" }

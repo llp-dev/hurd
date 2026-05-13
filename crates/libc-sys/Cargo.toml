@@ -1,0 +1,15 @@
+[package]
+name = "libc-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# links = "c" tells cargo this crate is the unique owner of -lc linkage.
+# Without it, two consumers each adding #[link(name = "c")] would silently
+# pass the flag twice. With it, cargo enforces single-source-of-truth.
+links = "c"
+
+[lib]
+name = "libc"
+# crate-type defaults to ["lib"] which produces an rlib — what we want.
+# Lib name stays "libc" so consumers write `use libc::*` regardless of
+# the package name.

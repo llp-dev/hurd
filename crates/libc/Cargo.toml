@@ -1,9 +1,0 @@
-[package]
-name = "libc"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[lib]
-name = "libc"
-# crate-type defaults to ["lib"] which produces an rlib — what we want.
