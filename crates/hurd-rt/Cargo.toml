@@ -1,0 +1,11 @@
+[package]
+name = "hurd-rt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "hurd_rt"
+
+[dependencies]
+libc = { package = "libc-sys", path = "../libc-sys" }

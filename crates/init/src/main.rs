@@ -36,12 +36,9 @@ use libc::{
     WAIT_ANY, WEXITSTATUS, WIFSIGNALED, WIFSTOPPED, WNOHANG, WTERMSIG, WUNTRACED,
 };
 
-// abort is only referenced by the panic handler, which is itself
-// cfg'd out in test mode. Keep the import behind the same cfg so we
-// don't get an "unused import" warning when rust-analyzer checks
-// with --tests.
-#[cfg(not(test))]
-use libc::abort;
+// hurd_rt provides the no_main + panic_handler boilerplate. We just call
+// hurd_rt::main!(|argc, argv| { ... }) below instead of declaring our own
+// extern "C" fn main.
 
 // Path to runsystem.hurd. Debian's Hurd packaging installs runsystem at
 // /usr/lib/hurd/runsystem.hurd via --libexecdir=/usr/lib/hurd. Hardcoded
@@ -174,12 +171,12 @@ unsafe extern "C" fn sigchld_handler(_sig: c_int) {
 
 // ---- entry point ----
 //
-// glibc's crt1 calls our `main` after the C runtime is initialized.
-// argc/argv come directly from the kernel via crt1 — no libstd
-// argv-marshalling needed.
+// hurd_rt::main! expands to the #[no_mangle] pub unsafe extern "C" fn main
+// declaration crt1 invokes. argc/argv come directly from the kernel via
+// crt1 — no libstd argv-marshalling needed. The panic_handler comes from
+// hurd_rt too, so this file doesn't repeat the boilerplate.
 
-#[no_mangle]
-pub unsafe extern "C" fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
+hurd_rt::main!(|argc, argv| {
     let argp = argp_t {
         options:     &OPTIONS[0].0 as *const argp_option,
         parser:      Some(parse_opt),
@@ -232,21 +229,4 @@ pub unsafe extern "C" fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     select(0, null_mut(), null_mut(), null_mut(), null_mut());
     0  // not reached
-}
-
-// ---- panic handler ----
-//
-// init never panics intentionally; if it ever does, aborting is the
-// most honest outcome (a Rust panic in PID 1 is no worse than a crash
-// in PID 1).
-//
-// #[cfg(not(test))] keeps rust-analyzer / `cargo check --tests` quiet:
-// in test mode the libstd panic_impl is in scope and would clash with
-// ours. We never actually build tests for this crate (it's a no_std
-// PID-1 binary), but the diagnostic fires anyway.
-
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe { abort() }
-}
+});
