@@ -8,4 +8,5 @@ license.workspace = true
 name = "hurd_rt"
 
 [dependencies]
-libc = { package = "libc-sys", path = "../libc-sys" }
+libc            = { package = "libc-sys", path = "../libc-sys" }
+hurd-rt-macros  = { path = "../hurd-rt-macros" }

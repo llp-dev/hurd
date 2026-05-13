@@ -171,12 +171,13 @@ unsafe extern "C" fn sigchld_handler(_sig: c_int) {
 
 // ---- entry point ----
 //
-// hurd_rt::main! expands to the #[no_mangle] pub unsafe extern "C" fn main
-// declaration crt1 invokes. argc/argv come directly from the kernel via
+// #[hurd_rt::entry] expands to #[no_mangle] pub unsafe extern "C" fn main,
+// the symbol crt1 invokes. argc/argv come directly from the kernel via
 // crt1 — no libstd argv-marshalling needed. The panic_handler comes from
 // hurd_rt too, so this file doesn't repeat the boilerplate.
 
-hurd_rt::main!(|argc, argv| {
+#[hurd_rt::entry]
+fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let argp = argp_t {
         options:     &OPTIONS[0].0 as *const argp_option,
         parser:      Some(parse_opt),
@@ -229,4 +230,4 @@ hurd_rt::main!(|argc, argv| {
 
     select(0, null_mut(), null_mut(), null_mut(), null_mut());
     0  // not reached
-});
+}

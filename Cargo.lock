@@ -6,8 +6,13 @@ version = 4
 name = "hurd-rt"
 version = "0.9.0"
 dependencies = [
+ "hurd-rt-macros",
  "libc-sys",
 ]
+
+[[package]]
+name = "hurd-rt-macros"
+version = "0.9.0"
 
 [[package]]
 name = "init"

@@ -1,0 +1,10 @@
+[package]
+name = "hurd-rt-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+# Proc-macro crates have only one valid crate-type. Cannot also build as
+# rlib. Consumers (hurd-rt) re-export the attributes for end users.
