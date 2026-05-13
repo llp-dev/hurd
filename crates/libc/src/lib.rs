@@ -57,6 +57,11 @@ pub struct argp_t {
 
 // ---- functions ----
 
+// #[link(name = "c")] tells rustc to add `-lc` to the link line. Without
+// it, no_std consumers get `-nodefaultlibs` from rustc and the linker
+// can't resolve __libc_start_main, write, fork, etc. The crt files
+// (Scrt1.o/crti.o/crtn.o) are still supplied by `cc` as the driver.
+#[link(name = "c")]
 extern "C" {
     pub fn argp_parse(argp: *const argp_t, argc: c_int, argv: *mut *mut c_char,
                       flags: c_uint, arg_index: *mut c_int,

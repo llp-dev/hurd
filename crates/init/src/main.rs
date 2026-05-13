@@ -1,5 +1,4 @@
-// A minimalist init for the Hurd, ported from init.c via the previous
-// no_std init.rs.
+// A minimalist init for the Hurd. no_std + no_main + cargo.
 //
 // Copyright (C) 2013, 2014 Free Software Foundation, Inc.
 // This file is part of the GNU Hurd.
@@ -14,14 +13,19 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
-// Behavior is a 1:1 port: same argp options, same signal mask, same
-// fork+execv of /usr/lib/hurd/runsystem.hurd, same select-forever main
-// loop, same SIGCHLD reaper.
+// Behavior is a 1:1 port of init.c: same argp options, same signal mask,
+// same fork+execv of /usr/lib/hurd/runsystem.hurd, same select-forever
+// main loop, same SIGCHLD reaper.
+//
+// Built as no_std + no_main: glibc's crt1 provides _start, _start calls
+// our `extern "C" fn main(argc, argv)`. There is no libstd runtime, no
+// allocator, no panic-unwinding. The binary is tens of KB, not megabytes.
 
+#![no_std]
+#![no_main]
 #![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
 
-use std::env;
-use std::ptr::{null, null_mut};
+use core::ptr::{null, null_mut};
 
 use libc::{
     argp_option, argp_parse, argp_t, asprintf, c_char, c_int, c_void,
@@ -31,6 +35,13 @@ use libc::{
     SIGTSTP, SIGUSR1, SIGUSR2, SIG_IGN,
     WAIT_ANY, WEXITSTATUS, WIFSIGNALED, WIFSTOPPED, WNOHANG, WTERMSIG, WUNTRACED,
 };
+
+// abort is only referenced by the panic handler, which is itself
+// cfg'd out in test mode. Keep the import behind the same cfg so we
+// don't get an "unused import" warning when rust-analyzer checks
+// with --tests.
+#[cfg(not(test))]
+use libc::abort;
 
 // Path to runsystem.hurd. Debian's Hurd packaging installs runsystem at
 // /usr/lib/hurd/runsystem.hurd via --libexecdir=/usr/lib/hurd. Hardcoded
@@ -89,8 +100,8 @@ const KEY_A: c_int = b'a' as c_int;
 // ---- shared state ----
 //
 // CHILD_PID is read/written from both main() and the SIGCHLD handler —
-// same race as the C version. SINGLE is set before the handler is installed
-// so the race is single-threaded.
+// same race as the C version. SINGLE is set before the handler is
+// installed so the race is single-threaded.
 
 static mut CHILD_PID: pid_t = 0;
 static mut SINGLE:    c_int = 0;
@@ -163,35 +174,12 @@ unsafe extern "C" fn sigchld_handler(_sig: c_int) {
 
 // ---- entry point ----
 //
-// We use a standard libstd fn main() and construct (argc, argv) from
-// std::env::args_os() so we can hand them to glibc's argp_parse().
-// glibc's argp may permute argv (it reorders options before positionals)
-// but does not mutate the underlying strings, so the storage we own is
-// safe for the duration of the call.
+// glibc's crt1 calls our `main` after the C runtime is initialized.
+// argc/argv come directly from the kernel via crt1 — no libstd
+// argv-marshalling needed.
 
-fn main() {
-    // Materialize each argv element as a NUL-terminated heap-owned Vec<u8>
-    // so the buffers are writable (argp_parse takes *mut c_char even
-    // though it does not write into them in practice).
-    let mut argv_bufs: Vec<Vec<u8>> = env::args_os()
-        .map(|s| {
-            let mut bytes = s.into_string()
-                .unwrap_or_else(|os| os.to_string_lossy().into_owned())
-                .into_bytes();
-            bytes.push(0);
-            bytes
-        })
-        .collect();
-
-    let mut argv_ptrs: Vec<*mut c_char> = argv_bufs
-        .iter_mut()
-        .map(|v| v.as_mut_ptr() as *mut c_char)
-        .collect();
-    argv_ptrs.push(null_mut()); // argp_parse expects a NULL terminator
-
-    let argc = argv_bufs.len() as c_int;
-    let argv = argv_ptrs.as_mut_ptr();
-
+#[no_mangle]
+pub unsafe extern "C" fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let argp = argp_t {
         options:     &OPTIONS[0].0 as *const argp_option,
         parser:      Some(parse_opt),
@@ -201,55 +189,64 @@ fn main() {
         help_filter: null(),
         argp_domain: null(),
     };
+    argp_parse(&argp, argc, argv, 0, null_mut(), null_mut());
 
-    unsafe {
-        argp_parse(&argp, argc, argv, 0, null_mut(), null_mut());
-
-        if getpid() != 1 {
-            error(1, 0,
-                  b"can only be run as PID 1\0".as_ptr() as *const c_char);
-        }
-
-        let mut sa = sigaction_t { sa_handler: SIG_IGN, sa_mask: 0, sa_flags: 0 };
-        sigemptyset(&mut sa.sa_mask);
-
-        sigaction(SIGHUP,  &sa, null_mut());
-        sigaction(SIGINT,  &sa, null_mut());
-        sigaction(SIGQUIT, &sa, null_mut());
-        sigaction(SIGTERM, &sa, null_mut());
-        sigaction(SIGUSR1, &sa, null_mut());
-        sigaction(SIGUSR2, &sa, null_mut());
-        sigaction(SIGTSTP, &sa, null_mut());
-
-        sa.sa_handler = sigchld_handler as *const () as usize;
-        sa.sa_flags  |= SA_RESTART;
-        sigaction(SIGCHLD, &sa, null_mut());
-
-        let path = RUNSYSTEM_PATH.as_ptr() as *const c_char;
-        let exec_args: [*const c_char; 2] = [path, null()];
-
-        let pid = fork();
-        CHILD_PID = pid;
-        match pid {
-            -1 => {
-                error(1, errno(),
-                      b"failed to fork\0".as_ptr() as *const c_char);
-            }
-            0 => {
-                execv(path, exec_args.as_ptr());
-                error(2, errno(),
-                      b"failed to execv child %s\0".as_ptr() as *const c_char,
-                      path);
-            }
-            _ => {}
-        }
-
-        select(0, null_mut(), null_mut(), null_mut(), null_mut());
-        // Not reached.
+    if getpid() != 1 {
+        error(1, 0,
+              b"can only be run as PID 1\0".as_ptr() as *const c_char);
     }
 
-    // Keep argv_bufs alive until here so glibc's argp_parse never sees
-    // dangling pointers. (Vec drops at end of scope.)
-    drop(argv_bufs);
-    drop(argv_ptrs);
+    let mut sa = sigaction_t { sa_handler: SIG_IGN, sa_mask: 0, sa_flags: 0 };
+    sigemptyset(&mut sa.sa_mask);
+
+    sigaction(SIGHUP,  &sa, null_mut());
+    sigaction(SIGINT,  &sa, null_mut());
+    sigaction(SIGQUIT, &sa, null_mut());
+    sigaction(SIGTERM, &sa, null_mut());
+    sigaction(SIGUSR1, &sa, null_mut());
+    sigaction(SIGUSR2, &sa, null_mut());
+    sigaction(SIGTSTP, &sa, null_mut());
+
+    sa.sa_handler = sigchld_handler as *const () as usize;
+    sa.sa_flags  |= SA_RESTART;
+    sigaction(SIGCHLD, &sa, null_mut());
+
+    let path = RUNSYSTEM_PATH.as_ptr() as *const c_char;
+    let exec_args: [*const c_char; 2] = [path, null()];
+
+    let pid = fork();
+    CHILD_PID = pid;
+    match pid {
+        -1 => {
+            error(1, errno(),
+                  b"failed to fork\0".as_ptr() as *const c_char);
+        }
+        0 => {
+            execv(path, exec_args.as_ptr());
+            error(2, errno(),
+                  b"failed to execv child %s\0".as_ptr() as *const c_char,
+                  path);
+        }
+        _ => {}
+    }
+
+    select(0, null_mut(), null_mut(), null_mut(), null_mut());
+    0  // not reached
+}
+
+// ---- panic handler ----
+//
+// init never panics intentionally; if it ever does, aborting is the
+// most honest outcome (a Rust panic in PID 1 is no worse than a crash
+// in PID 1).
+//
+// #[cfg(not(test))] keeps rust-analyzer / `cargo check --tests` quiet:
+// in test mode the libstd panic_impl is in scope and would clash with
+// ours. We never actually build tests for this crate (it's a no_std
+// PID-1 binary), but the diagnostic fires anyway.
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    unsafe { abort() }
 }
