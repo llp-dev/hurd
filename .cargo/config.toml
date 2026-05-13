@@ -3,6 +3,16 @@ linker = "cc"
 rustflags = [
     "-C", "link-arg=-lpthread",
     "-C", "link-arg=-lhurdbugaddr",
+    # -lmachuser provides Mach RPC client stubs (task_*, thread_*, ipc_*)
+    # that glibc-Hurd does NOT bake into libc.so.0.3. We add it
+    # unconditionally because every Rust server we care about touches
+    # some Mach RPC during startup (at minimum task_get_bootstrap_port).
+    # Init does not need it, but the unused link flag is harmless.
+    "-C", "link-arg=-lmachuser",
+    # -lhurduser likewise provides Hurd-flavored RPC client stubs
+    # (proc_*, auth_*, file_*). Not needed by shutdown today but
+    # essentially every other server will reach for it, so add it now.
+    "-C", "link-arg=-lhurduser",
 ]
 
 [target.i686-unknown-hurd-gnu]
@@ -10,4 +20,6 @@ linker = "cc"
 rustflags = [
     "-C", "link-arg=-lpthread",
     "-C", "link-arg=-lhurdbugaddr",
+    "-C", "link-arg=-lmachuser",
+    "-C", "link-arg=-lhurduser",
 ]
