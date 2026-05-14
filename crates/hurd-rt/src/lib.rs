@@ -43,3 +43,21 @@ pub use libc::{c_char, c_int};
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe { libc::abort() }
 }
+
+/// Empty `rust_eh_personality` stub.
+///
+/// Even with `panic = "abort"`, the precompiled `libcore.rlib` shipped by
+/// rustup carries unconditional references to `rust_eh_personality`
+/// (`.data.DW.ref.rust_eh_personality`). Release builds eliminate the
+/// referencing code paths via `-O3` + `--gc-sections`; debug builds don't,
+/// so the linker reports `undefined reference to rust_eh_personality` on
+/// the x86_64-unknown-hurd-gnu target.
+///
+/// Providing an empty extern "C" symbol satisfies the linker without
+/// pulling in libgcc_eh / libunwind. With `panic = "abort"` the function
+/// is never actually reached at runtime — it exists purely to keep the
+/// `.data.DW.ref` slot resolvable. Idiom borrowed from cortex-m-rt and
+/// most other no_std + abort runtime crates.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
