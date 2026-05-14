@@ -38,6 +38,14 @@ name = "mig"
 version = "0.9.0"
 dependencies = [
  "mach-sys",
+ "mig-macros",
+]
+
+[[package]]
+name = "mig-macros"
+version = "0.9.0"
+dependencies = [
+ "mach-sys",
 ]
 
 [[package]]
