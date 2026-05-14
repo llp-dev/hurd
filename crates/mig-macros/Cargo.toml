@@ -10,3 +10,6 @@ proc-macro = true
 # Like hurd-rt-macros: proc-macro crates have only one valid crate-type
 # and cannot also build as rlib. Consumers (the mig crate) re-export the
 # attributes/macros for end users.
+
+[dev-dependencies]
+mach-sys = { path = "../mach-sys" }

@@ -31,11 +31,22 @@
 
 extern crate proc_macro;
 
+mod parse;
+
 use proc_macro::TokenStream;
 
 #[proc_macro]
 pub fn routine(input: TokenStream) -> TokenStream {
-    // Stub for now — real implementation lands in Tasks 7-9.
-    let _ = input;
-    "compile_error!(\"mig::routine! not yet implemented\");".parse().unwrap()
+    let parsed = match parse::parse(input) {
+        Ok(p) => p,
+        Err(ts) => return ts,
+    };
+    // Codegen lands in Task 8. For now: emit a debug-only stub so the
+    // smoketest reaches the parser but still fails with a clear marker.
+    format!(
+        "compile_error!(\"mig::routine!({}) parsed; codegen pending\");",
+        parsed.fname
+    )
+    .parse()
+    .unwrap()
 }
