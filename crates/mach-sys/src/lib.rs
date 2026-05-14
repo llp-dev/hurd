@@ -147,17 +147,29 @@ pub const fn MACH_MSGH_BITS_REMOTE(bits: mach_msg_bits_t) -> mach_msg_bits_t {
 #[repr(C, align(8))]
 #[derive(Copy, Clone)]
 pub struct mach_msg_type_t {
+    /// Packed bitfields: bits 0..7 msgt_name, 8..23 msgt_size (in bits),
+    /// 24..28 msgt_unused (must be 0), 29 msgt_inline, 30 msgt_longform,
+    /// 31 msgt_deallocate. Layout matches gnumach <mach/message.h> under
+    /// __LP64__.
     pub bits: u32,
+    /// msgt_number: how many elements of msgt_size bits each. For a
+    /// single scalar this is 1.
+    pub number: u32,
 }
 
-/// Canonical descriptor for a single inline 32-bit signed integer
-/// (msgt_name = INTEGER_32, msgt_size = 32, msgt_number = 1, inline = 1).
-pub const MIG_TYPE_INT32: mach_msg_type_t = mach_msg_type_t {
-    bits: (MACH_MSG_TYPE_INTEGER_32 as u32)       // bits  0..7  msgt_name
-        | (32u32 << 8)                            // bits  8..15 msgt_size (BITS)
-        | (1u32  << 16)                           // bits 16..27 msgt_number
-        | (1u32  << 28),                          // bit  28     msgt_inline
-};
+/// Build a mach_msg_type_t descriptor at compile time. `size_bits` is
+/// the per-element bit count (32 for an int, 64 for a port name on LP64).
+#[inline]
+pub const fn mig_type(name: u8, size_bits: u16, inline: bool) -> mach_msg_type_t {
+    let bits = (name as u32)
+             | ((size_bits as u32) << 8)
+             | ((inline as u32) << 29);
+    mach_msg_type_t { bits, number: 1 }
+}
+
+/// Canonical descriptor for a single inline 32-bit signed integer.
+pub const MIG_TYPE_INT32: mach_msg_type_t =
+    mig_type(MACH_MSG_TYPE_INTEGER_32 as u8, 32, true);
 
 /// Size in bits the kernel expects for an inline port descriptor on
 /// this target. The check in `ipc_kmsg_copyin_body`
@@ -175,23 +187,15 @@ pub const PORT_T_SIZE_IN_BITS: u32 = 32;
 /// disposition (the most common outbound disposition — gives the
 /// receiver a copy of our send right while we keep ours). Used in port-
 /// transferring RPCs like fsys_startup.
-pub const MIG_TYPE_PORT_COPY_SEND: mach_msg_type_t = mach_msg_type_t {
-    bits: (MACH_MSG_TYPE_COPY_SEND as u32)        // bits  0..7  msgt_name
-        | (PORT_T_SIZE_IN_BITS << 8)              // bits  8..15 size in bits (pointer-sized in kernel)
-        | (1u32  << 16)                           // bits 16..27 count
-        | (1u32  << 28),                          // bit  28     inline
-};
+pub const MIG_TYPE_PORT_COPY_SEND: mach_msg_type_t =
+    mig_type(MACH_MSG_TYPE_COPY_SEND as u8, PORT_T_SIZE_IN_BITS as u16, true);
 
 /// Descriptor for a single inline send-right port name with MOVE_SEND
 /// disposition (transfer ownership). Used in reply paths where the
 /// server hands a port-right to the caller — e.g. realnode in
 /// fsys_startup's reply.
-pub const MIG_TYPE_PORT_MOVE_SEND: mach_msg_type_t = mach_msg_type_t {
-    bits: (MACH_MSG_TYPE_MOVE_SEND as u32)
-        | (PORT_T_SIZE_IN_BITS << 8)
-        | (1u32  << 16)
-        | (1u32  << 28),
-};
+pub const MIG_TYPE_PORT_MOVE_SEND: mach_msg_type_t =
+    mig_type(MACH_MSG_TYPE_MOVE_SEND as u8, PORT_T_SIZE_IN_BITS as u16, true);
 
 /// `msgh_bits` flag indicating the message carries port-right
 /// references (so the kernel knows to translate the inline names).
@@ -242,6 +246,34 @@ const _: () = {
     assert!(::core::mem::size_of::<mach_msg_header_t>() == 32);
     assert!(::core::mem::size_of::<mach_msg_type_t>()   ==  8);
     assert!(::core::mem::size_of::<Tagged<c_int>>()     == 16);
+};
+
+// Wire-format byte pattern of MIG_TYPE_INT32 on x86_64 LP64 GNU Mach.
+// Canonical reference is gnumach's <mach/message.h> mach_msg_type_t
+// definition under #ifdef __LP64__. Expected bytes (little-endian):
+//
+//   byte 0      : msgt_name  = MACH_MSG_TYPE_INTEGER_32 = 0x02
+//   bytes 1..2  : msgt_size  = 32  (16-bit field)        = 0x20 0x00
+//   byte 3      : bits 24..28 msgt_unused = 0
+//                 bit  29     msgt_inline = 1            -> 0x20
+//   bytes 4..7  : msgt_number = 1 (u32 LE)               = 0x01 0x00 0x00 0x00
+//
+// If this assertion fires, the bitfield encoding in mach_msg_type_t
+// does not match the LP64 layout and every MIG send will be rejected
+// with MACH_SEND_INVALID_TYPE (0x1000000f).
+#[cfg(target_pointer_width = "64")]
+const _: () = {
+    let bytes = unsafe {
+        ::core::mem::transmute::<mach_msg_type_t, [u8; 8]>(MIG_TYPE_INT32)
+    };
+    assert!(bytes[0] == 0x02);
+    assert!(bytes[1] == 0x20);
+    assert!(bytes[2] == 0x00);
+    assert!(bytes[3] == 0x20);
+    assert!(bytes[4] == 0x01);
+    assert!(bytes[5] == 0x00);
+    assert!(bytes[6] == 0x00);
+    assert!(bytes[7] == 0x00);
 };
 
 // ---- task special-port indices ----
