@@ -8,4 +8,5 @@ license.workspace = true
 name = "mig"
 
 [dependencies]
-mach-sys = { path = "../mach-sys" }
+mach-sys   = { path = "../mach-sys" }
+mig-macros = { path = "../mig-macros" }

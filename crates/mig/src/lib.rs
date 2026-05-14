@@ -50,6 +50,10 @@
 /// without forcing every consumer to add a `mach-sys` dependency separately.
 pub use mach_sys as mach;
 
+/// Re-export of the `routine!` proc-macro from `mig-macros`. End users
+/// invoke it as `mig::routine! { ... }`.
+pub use mig_macros::routine;
+
 /// `mach_reply_port` is provided by `mach_sys` and re-exported here so
 /// the macros can call it as `$crate::mach_reply_port` without an
 /// explicit `mach-sys` import in every consumer.
