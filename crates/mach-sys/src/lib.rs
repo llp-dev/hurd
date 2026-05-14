@@ -276,6 +276,20 @@ const _: () = {
     assert!(bytes[7] == 0x00);
 };
 
+/// Per-port-slot wire shape on LP64 GNU Mach. The kernel union allows
+/// stashing a pointer-sized value in the same slot that holds a u32
+/// port name. Userspace only ever fills `name`; `kernel_port_do_not_use`
+/// exists to document the slot size and is never touched by us.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union mach_port_name_inlined_t {
+    pub name:                   mach_port_t,
+    pub kernel_port_do_not_use: usize,
+}
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(::core::mem::size_of::<mach_port_name_inlined_t>() == 8);
+
 // ---- task special-port indices ----
 //
 // task_get_special_port takes a "which_port" int identifying which of
