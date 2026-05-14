@@ -18,9 +18,11 @@
 //!
 //! ## What's missing
 //!
-//! - `trivfs_demuxer`: stub. Returns 0 for every msgh_id; effective for
-//!   bootstrap but means real client RPCs (`stat`, `open`, etc.) will
-//!   bounce with MIG_BAD_ID until handlers are filled in.
+//! - `trivfs_demuxer`: not implemented in Rust. We currently re-export
+//!   libtrivfs's C implementation through `trivfs-sys` (`#[link(name = "trivfs")]`)
+//!   so real client RPCs (`stat`, `open`, etc.) work today. Replacing this
+//!   with a Rust-native dispatcher requires server-side mig codegen
+//!   (counterpart to `mig::routine!`) and is a future milestone.
 //! - `trivfs_create_control`, `trivfs_make_node`, `trivfs_make_peropen`,
 //!   `trivfs_open`, `trivfs_protid_dup`, `trivfs_set_options`,
 //!   `trivfs_append_args`: not implemented.
@@ -39,7 +41,6 @@
 #![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
 
 mod cleanup;
-mod demuxer;
 mod startup;
 pub mod types;
 
@@ -47,12 +48,18 @@ pub mod types;
 // symbols through the Rust API (`trivfs::trivfs_startup(...)`) instead
 // of having to declare extern blocks themselves.
 pub use cleanup::{trivfs_clean_cntl, trivfs_clean_protid};
-pub use demuxer::trivfs_demuxer;
 pub use startup::{
     trivfs_add_control_port_class, trivfs_add_port_bucket,
     trivfs_add_protid_port_class, trivfs_startup,
 };
 pub use types::{port_info, TrivfsControl, TrivfsPeropen, TrivfsProtid};
+
+// `trivfs_demuxer` is provided by libtrivfs (linked transitively via
+// trivfs-sys's `#[link(name = "trivfs")]`). Translators import it from
+// `trivfs::trivfs_demuxer` and the linker resolves it to libtrivfs.a's
+// real dispatcher. Once we have Rust handlers for the fs/io RPCs, this
+// re-export can be swapped for a Rust-native dispatcher.
+pub use trivfs_sys::trivfs_demuxer;
 
 // Convenience aliases matching the legacy C type names so translator
 // code can stay close to the C API surface.

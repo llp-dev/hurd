@@ -76,6 +76,7 @@ dependencies = [
  "mach-sys",
  "mig",
  "ports-sys",
+ "trivfs-sys",
 ]
 
 [[package]]

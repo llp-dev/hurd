@@ -18,7 +18,13 @@ license.workspace = true
 name = "trivfs"
 
 [dependencies]
-mach-sys  = { path = "../mach-sys" }
-ports-sys = { path = "../ports-sys" }
-mig       = { path = "../mig" }
-libc      = { package = "libc-sys", path = "../libc-sys" }
+mach-sys   = { path = "../mach-sys" }
+ports-sys  = { path = "../ports-sys" }
+mig        = { path = "../mig" }
+libc       = { package = "libc-sys", path = "../libc-sys" }
+# trivfs-sys carries `#[link(name = "trivfs")]`, which transitively pulls
+# -ltrivfs into the link line. We use it solely to fall back to
+# libtrivfs's real `trivfs_demuxer` for any fs/io RPC we haven't yet
+# implemented in Rust. Our `trivfs_startup` and the rest of trivfs's
+# C-ABI surface remain Rust strong symbols and win the link order.
+trivfs-sys = { path = "../trivfs-sys" }
