@@ -290,6 +290,59 @@ pub union mach_port_name_inlined_t {
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(::core::mem::size_of::<mach_port_name_inlined_t>() == 8);
 
+/// Descriptor for a port slot whose disposition is supplied by the
+/// caller at runtime. The macro fills msgt_name in with the actual
+/// disposition (e.g. MACH_MSG_TYPE_COPY_SEND) by overwriting the low
+/// 8 bits of the descriptor's `bits` field.
+pub const MIG_TYPE_PORT_SEND_POLY: mach_msg_type_t =
+    mig_type(MACH_MSG_TYPE_POLYMORPHIC as u8, PORT_T_SIZE_IN_BITS as u16, true);
+
+/// gnumach defines this as `((mach_msg_type_name_t)~0)` — the sentinel
+/// telling MIG-generated code "msgt_name is provided at runtime."
+pub const MACH_MSG_TYPE_POLYMORPHIC: mach_msg_type_name_t = !0;
+
+/// MIG-defined error codes used by generated reply-validation.
+pub const MIG_REPLY_MISMATCH:  kern_return_t = -304;
+pub const MIG_SERVER_DIED:     kern_return_t = -305;
+pub const MIG_BAD_ID:          kern_return_t = -302;
+
+/// Reply-header msgh_id that means "the send-once right we used to
+/// reply on was destroyed by the server". Treated as MIG_SERVER_DIED.
+pub const MACH_NOTIFY_SEND_ONCE: mach_msg_id_t = 70; // mach/notify.h
+
+/// Canonical short-error-reply shape: a server that errors before
+/// allocating return ports sends back just header + RetCode descriptor
+/// + RetCode + pad, with msgh_size == sizeof(mig_reply_header_t).
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct mig_reply_header_t {
+    pub head:         mach_msg_header_t,
+    pub retcode_type: mach_msg_type_t,
+    pub retcode:      kern_return_t,
+    pub retcode_pad:  u32,
+}
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(::core::mem::size_of::<mig_reply_header_t>() == 48);
+
+/// Equality-compare two descriptors as raw 8-byte values. Safe on LP64
+/// little-endian (every Hurd x86_64 target). Used in reply validation
+/// to confirm each out-arg's descriptor matches what the macro expects.
+#[inline(always)]
+pub unsafe fn bad_typecheck(a: *const mach_msg_type_t,
+                             b: *const mach_msg_type_t) -> bool {
+    ::core::ptr::read(a as *const u64) != ::core::ptr::read(b as *const u64)
+}
+
+extern "C" {
+    /// libc-provided MIG reply-port cache. Cheaper than `mach_reply_port`
+    /// for hot RPC paths because it reuses a thread-local port instead
+    /// of allocating + deallocating a receive right per call.
+    pub fn mig_get_reply_port() -> mach_port_t;
+    pub fn mig_put_reply_port(port: mach_port_t);
+    pub fn mig_dealloc_reply_port(port: mach_port_t);
+}
+
 // ---- task special-port indices ----
 //
 // task_get_special_port takes a "which_port" int identifying which of
