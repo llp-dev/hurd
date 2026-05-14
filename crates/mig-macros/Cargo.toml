@@ -1,0 +1,12 @@
+[package]
+name = "mig-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+# Like hurd-rt-macros: proc-macro crates have only one valid crate-type
+# and cannot also build as rlib. Consumers (the mig crate) re-export the
+# attributes/macros for end users.
