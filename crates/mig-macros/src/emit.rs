@@ -50,8 +50,13 @@ pub fn emit(p: &ParsedRoutine) -> TokenStream {
     }
 
     // ---- complex-bit decision ----
-    let any_in_port = p.in_args.iter().any(|a| is_port(a.tag));
-    let complex_in  = if any_in_port { "::mach_sys::MACH_MSGH_BITS_COMPLEX" } else { "0" };
+    let any_in_port  = p.in_args.iter().any(|a| is_port(a.tag));
+    let any_out_port = p.out_args.iter().any(|a| is_port(a.tag));
+    let complex_in   = if any_in_port { "::mach_sys::MACH_MSGH_BITS_COMPLEX" } else { "0" };
+    let expect_complex_lit = if any_out_port { "true" } else { "false" };
+
+    // ---- per-out-arg validation + extraction ----
+    let out_checks_and_extracts = out_checks_and_extracts(p);
 
     // ---- the whole emitted function ----
     let src = format!(r####"
@@ -122,9 +127,45 @@ pub fn emit(p: &ParsedRoutine) -> TokenStream {
             }}
             mig_put_reply_port(reply_port);
 
-            // Reply validation + extraction lands in Task 9.
-            let _ = REPLY_ID;
-            let _ = (REQUEST_ID, REPLY_SIZE);
+            let outp = storage.as_mut_ptr() as *mut Reply;
+
+            // -- reply validation --
+
+            // 1. Reply ID matches request_id + 100.
+            if (*outp).head.msgh_id != REPLY_ID {{
+                if (*outp).head.msgh_id == MACH_NOTIFY_SEND_ONCE {{
+                    return MIG_SERVER_DIED;
+                }}
+                return MIG_REPLY_MISMATCH;
+            }}
+
+            // 2. Size + complexity envelope: either full reply or short error.
+            let msgh_size = (*outp).head.msgh_size;
+            let is_simple = ((*outp).head.msgh_bits & MACH_MSGH_BITS_COMPLEX) == 0;
+            let expect_complex: bool = {expect_complex_lit};
+            let full_ok  = msgh_size == REPLY_SIZE
+                           && (is_simple != expect_complex);
+            let short_ok = msgh_size == ::core::mem::size_of::<mig_reply_header_t>() as mach_msg_size_t
+                           && is_simple
+                           && (*outp).retcode != KERN_SUCCESS;
+            if !full_ok && !short_ok {{
+                return MIG_TYPE_ERROR;
+            }}
+
+            // 3. RetCode descriptor matches MIG_TYPE_INT32; if RetCode is
+            //    nonzero on a short reply, return it (server error).
+            if bad_typecheck(&(*outp).retcode_type, &MIG_TYPE_INT32) {{
+                return MIG_TYPE_ERROR;
+            }}
+            if (*outp).retcode != KERN_SUCCESS {{
+                return (*outp).retcode;
+            }}
+
+            // 4. Each out-arg's descriptor matches its expected shape;
+            //    then extract the value into the caller's out-pointer.
+            {out_checks_and_extracts}
+
+            let _ = REQUEST_ID;
             KERN_SUCCESS
         }}
     "####,
@@ -137,6 +178,8 @@ pub fn emit(p: &ParsedRoutine) -> TokenStream {
         target    = p.target,
         msgh_id   = msgh_id,
         reply_id  = reply_id,
+        expect_complex_lit       = expect_complex_lit,
+        out_checks_and_extracts  = out_checks_and_extracts,
     );
 
     src.parse().expect("emit produced invalid Rust")
@@ -217,4 +260,31 @@ fn req_write(arg: &Arg) -> String {
 
 fn is_port(t: TypeTag) -> bool {
     matches!(t, TypeTag::PortSend | TypeTag::PortSendPoly)
+}
+
+fn out_checks_and_extracts(p: &ParsedRoutine) -> String {
+    let mut s = String::new();
+    for arg in &p.out_args {
+        match arg.tag {
+            TypeTag::Int => {
+                s.push_str(&format!(
+                    "if bad_typecheck(&(*outp).{n}_type, &MIG_TYPE_INT32) {{ return MIG_TYPE_ERROR; }}\n\
+                     *{n} = (*outp).{n};\n",
+                    n = arg.name,
+                ));
+            }
+            TypeTag::PortSend | TypeTag::PortSendPoly => {
+                // Server sends ports back with MOVE_SEND disposition
+                // (transferring ownership) — match against
+                // MIG_TYPE_PORT_MOVE_SEND.
+                s.push_str(&format!(
+                    "if bad_typecheck(&(*outp).{n}_type, &MIG_TYPE_PORT_MOVE_SEND) {{ return MIG_TYPE_ERROR; }}\n\
+                     *{n} = (*outp).{n}.name;\n",
+                    n = arg.name,
+                ));
+            }
+            TypeTag::MachPortT => unreachable!(),
+        }
+    }
+    s
 }
