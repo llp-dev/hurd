@@ -343,6 +343,28 @@ extern "C" {
     pub fn mig_dealloc_reply_port(port: mach_port_t);
 }
 
+/// `mach_port_right_t` values from `<mach/port.h>`. Used by
+/// `mach_port_allocate` to ask the kernel for a fresh port of the named
+/// kind (typically RIGHT_RECEIVE for "allocate me a brand-new receive
+/// right whose port name is unique in this task").
+pub type mach_port_right_t = c_int;
+pub const MACH_PORT_RIGHT_SEND:      mach_port_right_t = 0;
+pub const MACH_PORT_RIGHT_RECEIVE:   mach_port_right_t = 1;
+pub const MACH_PORT_RIGHT_SEND_ONCE: mach_port_right_t = 2;
+
+extern "C" {
+    /// Allocate a new port right of the requested kind in `task`'s port
+    /// space. On success `*name` holds the port name (a u32). Used to
+    /// mint the fingerprint receive rights libtrivfs stashes in
+    /// `trivfs_control::{filesys_id, file_id}` so clients can compare
+    /// "is this the same filesystem / same file" across opens.
+    pub fn mach_port_allocate(
+        task:  mach_port_t,
+        right: mach_port_right_t,
+        name:  *mut mach_port_t,
+    ) -> kern_return_t;
+}
+
 // ---- task special-port indices ----
 //
 // task_get_special_port takes a "which_port" int identifying which of

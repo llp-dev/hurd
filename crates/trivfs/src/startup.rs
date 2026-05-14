@@ -22,8 +22,8 @@ use core::ptr::null_mut;
 
 use libc::{c_int, error_t};
 use mach_sys::{
-    mach_port_deallocate, mach_port_t, mach_task_self,
-    MACH_MSG_TYPE_COPY_SEND, MACH_PORT_NULL,
+    mach_port_allocate, mach_port_deallocate, mach_port_t, mach_task_self,
+    MACH_MSG_TYPE_COPY_SEND, MACH_PORT_NULL, MACH_PORT_RIGHT_RECEIVE,
 };
 use ports_sys::{
     port_bucket, port_class, ports_create_bucket, ports_create_class,
@@ -115,10 +115,40 @@ unsafe fn create_control(
     // trivfs-private tail we layer on top.
     (*fsys).protid_class  = protid_class;
     (*fsys).protid_bucket = protid_bucket;
-    (*fsys).filesys_id    = 0;
-    (*fsys).file_id       = 0;
     (*fsys).underlying    = underlying;
     (*fsys).hook          = null_mut();
+
+    // Allocate the fingerprint receive rights libtrivfs's fsys_getroot
+    // and io_stat handlers expect. These ports never carry messages —
+    // their only purpose is to give each filesystem/file a globally-
+    // unique port name that clients can compare for identity. Mirrors
+    // libtrivfs/cntl-create.c.
+    let mut filesys_id: mach_port_t = 0;
+    let kr = mach_port_allocate(
+        mach_task_self(),
+        MACH_PORT_RIGHT_RECEIVE,
+        &mut filesys_id,
+    );
+    if kr != 0 {
+        ports_port_deref(fsys as *mut c_void);
+        return kr;
+    }
+
+    let mut file_id: mach_port_t = 0;
+    let kr = mach_port_allocate(
+        mach_task_self(),
+        MACH_PORT_RIGHT_RECEIVE,
+        &mut file_id,
+    );
+    if kr != 0 {
+        // Tear down the partially-built control on failure.
+        mach_port_deallocate(mach_task_self(), filesys_id);
+        ports_port_deref(fsys as *mut c_void);
+        return kr;
+    }
+
+    (*fsys).filesys_id = filesys_id;
+    (*fsys).file_id    = file_id;
     *control = fsys;
     0
 }
